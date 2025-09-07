@@ -1,6 +1,9 @@
 use std::{error::Error, ffi::OsStr, fmt::Display, io::{self, Read, Write}, path::Path, process::{Command, ExitStatus}, env, process};
 
-use arboard::{Clipboard, SetExtLinux};
+use arboard::Clipboard;
+
+#[cfg(target_os="linux")]
+use arboard::SetExtLinux;
 
 // Identifier appended to the beginning of custom missions codes supported by this tool
 // Followed by settings, then code contents verbatim
@@ -192,13 +195,13 @@ fn check_git_status() -> Result<(), GitError> {
 }
 
 fn git_command_status<I, S>(args: I, on_fail: Option<GitError>) -> Result<ExitStatus, GitError>
-    where I : IntoIterator<Item = S>,
-          S : AsRef<OsStr>
+    where I : IntoIterator<Item = S> + Clone,
+          S : AsRef<OsStr> + std::fmt::Display,
 {
     check_git_status()?;
 
     let mut cmd = Command::new("git");
-    cmd.args(args);
+    cmd.args(args.clone());
 
     return match cmd.output() {
         Ok(o) => {
@@ -210,7 +213,18 @@ fn git_command_status<I, S>(args: I, on_fail: Option<GitError>) -> Result<ExitSt
                 None => Ok(o.status)
             }
         },
-        Err(e) => Err(GitError::IoFailed(format!("{:?}", cmd), e))
+        Err(e) => {
+            let mut args_str = String::with_capacity(64);
+
+            args_str.push('[');
+            for arg in args {
+                args_str.push_str(&arg.to_string());
+                args_str.push_str(", ");
+            }
+            args_str.push(']');
+            println!("Encountered error {} while running git command {}", e, args_str);
+            Err(GitError::IoFailed(format!("{:?}", cmd), e))
+        }
     };
 }
 
