@@ -1,3 +1,4 @@
+use core::time;
 use std::{error::Error, ffi::OsStr, fmt::Display, io::{self, Read, Write}, path::Path, process::{Command, ExitStatus}, env, process};
 
 use arboard::Clipboard;
@@ -7,16 +8,17 @@ use arboard::SetExtLinux;
 
 // Identifier appended to the beginning of custom missions codes supported by this tool
 // Followed by settings, then code contents verbatim
-const LINUX_CM_IDENTIFIER: &'static str = "_epfc_cm_ls";
+const CODELESS_CM_IDENTIFIER: &'static str = "_infilengine_cm_codeless";
 
 const MISSION_VERSION_FILE: &'static str = ".custommissionversion";
 
 #[derive(Debug)]
-struct LinuxCustomMissionData {
+struct CodelessMissionData {
     pub gist_url: String,
     pub gist_file: String,
     pub std_code_contents: String,
     pub repo_mission_version: u32,
+    pub codeless_fmt_version: u32,
 }
 
 #[cfg(target_os="linux")]
@@ -59,6 +61,12 @@ fn handle_clipboard_daemon() -> bool { return false }
 fn main() {
     if handle_clipboard_daemon() { return; }
 
+    let mut standby_mode = false;
+    for arg in env::args() {
+        standby_mode = arg == "--standby";
+        if standby_mode { break; }
+    }
+
     println!("Checking git status...");
     match check_git_status() {
         Ok(_) => (),
@@ -71,15 +79,14 @@ fn main() {
         Err(e) => return println!("Encountered error {} when attempting to retrieve clipboard!", e)
     };
 
-    let cm_info = match get_cm_info(&mut clipboard) {
-        Ok(i) => i,
-        Err(e) => return println!("{}", e)
-    };
-
-    println!("Running relevant git operations...");
-    let url = match push_linux_cm(&cm_info) {
-        Ok(s) => s,
-        Err(e) => return println!("{}", e)
+    let (url, cm_info) = match standby_mode {
+        true => standby_loop(&mut clipboard),
+        false => {
+            match push_from_clipboard(&mut clipboard) {
+                Ok(s) => s,
+                Err(e) => return println!("{}", e)
+            }
+        }
     };
     
     println!("Copying gist code to clipboard...");
@@ -88,8 +95,73 @@ fn main() {
         Err(e) => return println!("{}", e)
     };
 
-    println!("All Succeeded!");
+    println!("Successfully pushed mission version {}!", cm_info.repo_mission_version);
 
+}
+
+fn standby_loop(clipboard: &mut Clipboard) -> ! {
+    println!("Program is running in standby mode! Program may be killed by pressing CTRL+C");
+
+    let mut is_first_loop = true;
+    let mut last_clipboard = String::from("");
+    loop {
+        if !is_first_loop {
+            // Wait for half a second to avoid repeatedly querying the clipboard
+            std::thread::sleep(time::Duration::from_millis(500));
+        }
+        is_first_loop = false;
+
+        let current_clipboard = match clipboard.get_text() {
+            Ok(s) => s,
+            Err(e) => {
+                println!("Failed to retrieve clipboard text with error {}!", e);
+                continue;
+            }
+        };
+
+        match current_clipboard == last_clipboard {
+            true => continue,
+            false => ()
+        };
+
+        let (url, cm_info) = match push_from_code(&current_clipboard) {
+            Ok(s) => s,
+            Err(e) => match e {
+                GitError::CodeNotMission => continue,
+                _ => {
+                    println!("Encountered error {} while attempting to push mission from clipboard!", e);
+                    continue;
+                }
+            }
+        };
+
+        match set_clipboard_text(clipboard, &url) {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Encountered error {} while attempting to set clipboard text!", e);
+                continue;
+            }
+        }
+
+        last_clipboard = current_clipboard;
+        println!("Successfully pushed mission version {}!", cm_info.repo_mission_version)
+    }
+
+}
+
+fn push_from_clipboard(clipboard: &mut Clipboard) -> Result<(String, CodelessMissionData), GitError> {
+    return push_from_code(&get_clipboard_text(clipboard)?);
+}
+
+fn push_from_code(code: &str) -> Result<(String, CodelessMissionData), GitError> {
+    let mut cm_info = match parse_mission_data(code) {
+        Ok(i) => i,
+        Err(e) => return Err(e)
+    };
+
+    println!("Running relevant git operations...");
+    cm_info.repo_mission_version += 1;
+    return push_codeless_mission(&cm_info).map(|url| {(url, cm_info)});
 }
 
 #[cfg(target_os="linux")]
@@ -102,7 +174,7 @@ fn set_clipboard_text(_clipboard: &mut Clipboard, to: &str) -> Result<(), GitErr
     // Spawn clone of this program with daemon argument
     let res = process::Command::new(self_path)
             .arg(DAEMON_ARG)
-            .arg(format!("\"{}\"", to))
+            .arg(to)
             .stdin(process::Stdio::null())
             .stdout(process::Stdio::null())
             .stderr(process::Stdio::null())
@@ -123,18 +195,30 @@ fn set_clipboard_text(clipboard: &mut Clipboard, to: &str) -> Result<(), GitErro
     };
 }
 
-fn get_cm_info(clipboard: &mut Clipboard) -> Result<LinuxCustomMissionData, GitError> {
-    println!("Getting mission code from clipboard...");
-    let mission_code = match clipboard.get_text() {
-        Ok(s) => s,
-        Err(e) => return Err(GitError::ClipboardFailed(String::from("get clipboard text"), e))
-    };
-
-    println!("Collecting repo info...");
-    return match read_linux_cm_settings(&mission_code) {
+fn get_clipboard_text(clipboard: &mut Clipboard) -> Result<String, GitError> {
+    return match clipboard.get_text() {
         Ok(s) => Ok(s),
-        Err(e) => Err(e)
-    };
+        Err(e) => Err( GitError::ClipboardFailed(String::from("get clipboard text"), e) )
+    }
+}
+
+fn parse_mission_data(code: &str) -> Result<CodelessMissionData, GitError> {
+    if !code.starts_with(CODELESS_CM_IDENTIFIER) { return Err(GitError::CodeNotMission) }
+
+    let list: Vec<&str> = code.splitn(5, "|").collect();
+
+    if list.len() != 5 { return Err(GitError::CodeHeaderTooShort); }
+
+    let mission_version = read_mission_version()?;
+    let codeless_fmt_version_str = list.get(3).unwrap();
+
+    return Ok(CodelessMissionData {
+        gist_url: list.get(1).unwrap().to_string(),
+        gist_file: list.get(2).unwrap().to_string(),
+        std_code_contents: list.get(4).unwrap().to_string(),
+        repo_mission_version: mission_version.unwrap_or(0),
+        codeless_fmt_version: codeless_fmt_version_str.parse().unwrap()
+    })
 }
 
 #[derive(Debug)]
@@ -152,7 +236,7 @@ enum GitError {
     NotInRepo,
     NoRemoteRepo,
     CodeHeaderTooShort,
-    ClipboardNotMission,
+    CodeNotMission,
 }
 
 impl Display for GitError {
@@ -165,7 +249,7 @@ impl Display for GitError {
             Self::NotInRepo         => f.write_str("not in git repo"),
             Self::NoRemoteRepo      => f.write_str("repo has no remote"),
             Self::CodeHeaderTooShort => f.write_str("code header too short"),
-            Self::ClipboardNotMission => f.write_str("clipboard contents are not a custom mission"),
+            Self::CodeNotMission => f.write_str("clipboard contents are not a custom mission"),
             
             Self::WrongRemoteRepo(e, g)   => f.write_fmt(format_args!("current repo remote ({}) doesn't match that included with the mission code ({})", g, e)),
             Self::IoFailed(c, e) => f.write_fmt(format_args!("i/o operation {} failed with error {}", c, e)),
@@ -203,25 +287,29 @@ fn git_command_status<I, S>(args: I, on_fail: Option<GitError>) -> Result<ExitSt
     let mut cmd = Command::new("git");
     cmd.args(args.clone());
 
+    let mut args_str = String::with_capacity(64);
+    args_str.push('[');
+    for arg in args {
+        args_str.push_str(&arg.to_string());
+        args_str.push_str(", ");
+    }
+    args_str.push(']');
+
     return match cmd.output() {
         Ok(o) => {
             match on_fail {
                 Some(ge) => match o.status.success() {
                     true => Ok(o.status),
-                    false => Err(ge)
+                    false => {
+                        println!("{:?}", o);
+                        println!("Encountered error {} while running git command {}", ge, args_str);
+                        Err(ge)
+                    }
                 },
                 None => Ok(o.status)
             }
         },
         Err(e) => {
-            let mut args_str = String::with_capacity(64);
-
-            args_str.push('[');
-            for arg in args {
-                args_str.push_str(&arg.to_string());
-                args_str.push_str(", ");
-            }
-            args_str.push(']');
             println!("Encountered error {} while running git command {}", e, args_str);
             Err(GitError::IoFailed(format!("{:?}", cmd), e))
         }
@@ -229,8 +317,8 @@ fn git_command_status<I, S>(args: I, on_fail: Option<GitError>) -> Result<ExitSt
 }
 
 fn git_command_stdout<I, S>(args: I, cmd_fail_err: GitError) -> Result<String, GitError> 
-    where I : IntoIterator<Item = S>,
-          S : AsRef<OsStr>
+    where I : IntoIterator<Item = S> + Clone,
+          S : AsRef<OsStr> + std::fmt::Display,
 {
     check_git_status()?;
 
@@ -257,7 +345,7 @@ fn get_remote_url() -> Result<String, GitError> {
     return git_command_stdout(["config", "--get", "remote.origin.url"], GitError::NoRemoteRepo);
 }
 
-fn push_linux_cm(data: &LinuxCustomMissionData) -> Result<String, GitError> {
+fn push_codeless_mission(data: &CodelessMissionData) -> Result<String, GitError> {
     match get_remote_url() {
         Ok(url) => match url == data.gist_url {
             true => (),
@@ -279,14 +367,14 @@ fn push_linux_cm(data: &LinuxCustomMissionData) -> Result<String, GitError> {
     }
     drop(code_file); // Close the file
 
-    write_mission_version(data.repo_mission_version+1)?;
+    write_mission_version(data.repo_mission_version)?;
 
     // Add code + version to commit
     git_command_status(["add", &data.gist_file], Some(GitError::GitAddFailed))?;
     git_command_status(["add", MISSION_VERSION_FILE], Some(GitError::GitAddFailed))?;
 
     // Commit changes
-    git_command_status(["commit", "-m", &format!("v{}", data.repo_mission_version+1)], Some(GitError::GitCommitFailed))?;
+    git_command_status(["commit", "-m", &format!("v{}", data.repo_mission_version)], Some(GitError::GitCommitFailed))?;
 
     // Push
     git_command_status(["push"], Some(GitError::GitPushFailed))?;
@@ -297,24 +385,6 @@ fn push_linux_cm(data: &LinuxCustomMissionData) -> Result<String, GitError> {
         get_current_commit_hash()?,
         data.gist_file
     ))
-}
-
-fn read_linux_cm_settings(code: &str) -> Result<LinuxCustomMissionData, GitError> {
-    let list: Vec<&str> = code.splitn(4, "|").collect();
-
-    if list.len() != 4 { return Err(GitError::CodeHeaderTooShort); }
-
-    println!("Comparing header {} with {}", list.get(0).unwrap(), LINUX_CM_IDENTIFIER);
-    if !list.get(0).unwrap().eq(&LINUX_CM_IDENTIFIER) { return Err(GitError::ClipboardNotMission); }
-
-    let mission_version = read_mission_version()?;
-
-    return Ok(LinuxCustomMissionData {
-        gist_url: list.get(1).unwrap().trim().to_string(),
-        gist_file: list.get(2).unwrap().trim().to_string(),
-        std_code_contents: list.get(3).unwrap().trim_start().to_string(),
-        repo_mission_version: mission_version.unwrap_or(0)
-    })
 }
 
 fn read_mission_version() -> Result<Option<u32>, GitError> {
