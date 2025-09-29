@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}};
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
@@ -7,6 +7,7 @@ mod program_info;
 
 mod cmterm;
 
+mod clipboard;
 mod server;
 mod repo_management;
 mod mission_codes;
@@ -82,12 +83,14 @@ fn validate_args(mut args: ProgramArgs, log: &cmterm::Log) -> Result<ProgramArgs
 }
 
 fn run_server(program: &ProgramInfo) -> Result<(), MainErr> {
+    let program_args = program_info::get_args();
+
     // Start Server
-    program.main_log.log(format!("Starting server @ localhost:{}", program.args.port));
+    program.main_log.log(format!("Starting server @ localhost:{}", program_args.port));
 
     let (join, send) = server::start(&program)?;
 
-    if program.args.no_interactivity {
+    if program_args.no_interactivity {
         program.main_log.log("Will yield indefinitely while server runs in non-interactive mode\nQuit with CTRL+C");
 
         // Should infinitely yield @ join.join()
@@ -112,12 +115,12 @@ fn run_server(program: &ProgramInfo) -> Result<(), MainErr> {
 
 fn program_loop(mut program: ProgramInfo) -> Result<(), MainErr> {
     // is_none == true when input.to_lowercase() == "exit"
-    if program.args.repo_path.is_none() {
+    if program.repo_path.is_none() {
         program.main_log.log("Exiting...");
         return Ok(());
     }
 
-    let repo_path = program.args.repo_path.as_ref().unwrap();
+    let repo_path = program.repo_path.as_ref().unwrap();
 
     let _repo = match repo_management::get_repo(repo_path) {
         Ok(r) => r,
@@ -125,7 +128,7 @@ fn program_loop(mut program: ProgramInfo) -> Result<(), MainErr> {
             program.main_log.log_warn(
                 format!("Failed to initialize repo @ \"{}\" with error:\n{}", repo_path.display(), e)
             );
-            program.args.repo_path = prompt_repo_path(&program.main_log)?;
+            program.repo_path = prompt_repo_path(&program.main_log)?;
             return program_loop(program);
         }
     };
@@ -139,12 +142,21 @@ fn program_loop(mut program: ProgramInfo) -> Result<(), MainErr> {
     }
 
     program.main_log.log("Killed Previous Server\nTo open a server for a different repo, please enter a repo path");
-    program.args.repo_path = prompt_repo_path(&program.main_log)?;
+    program.repo_path = prompt_repo_path(&program.main_log)?;
     return program_loop(program);
 }
 
 fn main() {
     let mut args = ProgramArgs::parse();
+
+    #[cfg(target_os="linux")]
+    match args.linux_clipboard_daemon.as_ref() {
+        Some(text) => { clipboard::run_as_daemon(text).expect("this might error but we can't handle it gracefully fucking die i guess"); },
+        None => ()
+    };
+
+    #[cfg(target_os="linux")]
+    if args.linux_clipboard_daemon.is_some() { return }
 
     let term_man = cmterm::Manager::new();
     let main_log = term_man.main_log.clone();
@@ -160,10 +172,12 @@ fn main() {
         }
     };
 
+    let args = program_info::set_args(args);
+
     let program = ProgramInfo {
-        args: args,
         main_log: main_log,
-        srvr_log: server_log
+        srvr_log: server_log,
+        repo_path: args.repo_path.clone(),
     };
 
     match program_loop(program) {

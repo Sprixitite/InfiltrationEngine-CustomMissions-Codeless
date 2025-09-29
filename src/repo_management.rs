@@ -154,7 +154,7 @@ pub fn remote_name_from_url(repo: &Repository, remote_url: &str) -> Result<Optio
         match remote.url() {
             Some(url) => url.eq(remote_url),
             None => {
-                thread_log.log(format!("URL for remote {} is not valid UTF-8", remote.name().expect("remote name should be valid UTF-8")));
+                thread_log.log_warn(format!("URL for remote {} is not valid UTF-8", remote.name().expect("remote name should be valid UTF-8")));
                 false
             }
         }
@@ -164,6 +164,31 @@ pub fn remote_name_from_url(repo: &Repository, remote_url: &str) -> Result<Optio
         Some(r) => r.name().map(|s| { s.to_string() }),
         None => None
     });
+}
+
+pub fn remote_url_from_name(repo: &Repository, remote_name: &str) -> Result<Option<String>, RepoError> {
+    let thread_log = cmterm::Log::get();
+    let remotes = get_remotes(repo)?;
+
+    let mut i = 0;
+    let remote = remotes.into_iter().find(|remote| {
+        match remote.name() {
+            Some(name) => name.eq(remote_name),
+            None => {
+                i += 1;
+                false
+            }
+        }
+    });
+
+    if i > 0 {
+        thread_log.log_warn("One or more remotes has invalid UTF-8 title");
+    }
+
+    return Ok(match remote {
+        Some(r) => r.url().map(|s| { s.to_string() }),
+        None => None
+    })
 }
 
 pub fn repo_errname(repo: &Repository) -> String {
@@ -406,7 +431,7 @@ pub fn publish(repo: &Repository, item: &mut impl RepoPublishable, author: Optio
         item.publish_target_file()
     );
 
-    match arboard::Clipboard::new().unwrap().set_text(content_url) {
+    match crate::clipboard::set_text(content_url) {
         Ok(_) => thread_log.log_success("Copied link to clipboard"),
         Err(e) => {
             thread_log.log_err(format!("Error whilst copying to clipboard {:?}", e));

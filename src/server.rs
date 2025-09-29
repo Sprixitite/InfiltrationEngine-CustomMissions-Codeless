@@ -5,7 +5,7 @@ use git2::Repository;
 use rouille::Request;
 use rouille::{Response, ResponseBody};
 
-use crate::program_info::ProgramInfo;
+use crate::program_info::{self, ProgramInfo};
 
 use crate::{cmterm, repo_management};
 use crate::mission_codes;
@@ -94,12 +94,24 @@ fn server_requests_loop(request: &Request, repo: &Repository, log: &cmterm::Log)
         }
     };
 
+    let program_args = program_info::get_args();
+
+    let gist_url = match &mission_code.gist_url {
+        Some(s) => s.clone(),
+        None => repo_management::remote_url_from_name(repo, &mission_code.gist_remote.as_ref().expect("Mission should have remote to be valid")).expect("URL should exist for remote").expect("URL should exist for remote")
+    };
+
+    let gist_url_display = match program_args.hide_url {
+        true => "*".repeat(gist_url.len()),
+        false => gist_url
+    };
+
     log.log_success(
         format!(
             "Parsed sent mission code, details are as follows:\nVersion: {}\nGist File: {}\nGist URL: {}\nGist Remote: {}\nFeature Count: {}\nFeatures: [{}]",
             mission_code.codeless_fmt_version.version(),
             &mission_code.gist_file,
-            &mission_code.gist_url.as_ref().unwrap_or(&String::from("None")),
+            gist_url_display,
             &mission_code.gist_remote.as_ref().unwrap_or(&String::from("None")),
             mission_code.codeless_features.len(),
             mission_code.feature_display()
@@ -118,10 +130,11 @@ fn server_requests_loop(request: &Request, repo: &Repository, log: &cmterm::Log)
 }
 
 pub fn start(program: &ProgramInfo) -> Result<(JoinHandle<()>, Sender<()>), ServerError> {
+    let program_args = program_info::get_args();
 
     let srvr_log = program.srvr_log.clone();
-    let repo = Mutex::new(repo_management::get_repo(program.args.repo_path.as_ref().expect(""))?);
-    let server_start_result = rouille::Server::new(format!("localhost:{}", program.args.port), move | request | {
+    let repo = Mutex::new(repo_management::get_repo(program.repo_path.as_ref().expect(""))?);
+    let server_start_result = rouille::Server::new(format!("localhost:{}", program_args.port), move | request | {
         cmterm::Log::set(srvr_log.clone());
         let repo = &repo;
         return server_requests_loop(request, &repo.lock().unwrap(), &srvr_log);
