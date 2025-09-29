@@ -1,7 +1,16 @@
 [package]
 name = "infilengine_codeless"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
+
+authors = ["Sprixitite"]
+description = "InfiltrationEngine Codeless Client - Handles publishing of missions without ever copying a mission code"
 
 [dependencies]
 arboard = "3.6.1"
+clap = { version = "4.5.47", features = ["derive"] }
+console = "0.16.1"
+dirs = "6.0.0"
+git2 = "0.20.2"
+auth-git2 = "0.5.8"
+rouille = "3.6.2"
