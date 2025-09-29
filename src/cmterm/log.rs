@@ -46,7 +46,7 @@ impl Log {
         }
     }
 
-    #[allow(unused_mut)]
+    #[allow(unused)]
     pub fn with_disk_log(mut self, path: impl Into<String>) -> Self {
         self.data.lock().unwrap().disk_log_path = Some(path.into());
         return self;
@@ -160,7 +160,7 @@ impl Log {
     }
 
     pub fn name(&self) -> String {
-        return { self.data.lock().unwrap().title.clone() };
+        return self.data.lock().unwrap().title.clone();
     }
 
     fn thread_name() -> String {
@@ -200,8 +200,8 @@ impl Log {
 impl auth_git2::Prompter for LogHandle {
     fn prompt_username_password(
         &mut self,
-        url: &str,
-        git_config: &git2::Config,
+        _url: &str,
+        _git_config: &git2::Config,
     ) -> Option<(String, String)> {
         let username = match self.inner.request_string("Enter Git Username // ") {
             Ok(s) => Some(s),
@@ -225,8 +225,8 @@ impl auth_git2::Prompter for LogHandle {
     fn prompt_password(
         &mut self,
         username: &str,
-        url: &str,
-        git_config: &git2::Config,
+        _url: &str,
+        _git_config: &git2::Config,
     ) -> Option<String> {
         return match self.inner.request_password(format!("Enter Git Password [{}] // ", &username)) {
             Ok(pwd) => Some(pwd),
@@ -237,7 +237,7 @@ impl auth_git2::Prompter for LogHandle {
     fn prompt_ssh_key_passphrase(
         &mut self,
         private_key_path: &Path,
-        git_config: &git2::Config,
+        _git_config: &git2::Config,
     ) -> Option<String> {
         return match self.inner.request_password(format!("Enter SSH Key Passphrase [{:.32}] // ", &private_key_path.to_string_lossy())) {
             Ok(passkey) => Some(passkey),

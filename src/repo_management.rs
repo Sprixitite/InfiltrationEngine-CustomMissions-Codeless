@@ -1,6 +1,6 @@
-use std::{error::Error, fmt::{Debug, Display}, fs, io::{self, Read, Seek, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{error::Error, fmt::{Debug, Display}, fs, io::{self, Read, Seek, Write}, path::{Path, PathBuf}};
 
-use git2::{Index, IndexAddOption, PushOptions, Remote, RemoteCallbacks, Repository, Signature};
+use git2::{Index, IndexAddOption, Remote, Repository, Signature};
 
 use crate::cmterm::{self, LogHandle};
 
@@ -409,6 +409,7 @@ pub fn publish(repo: &Repository, item: &mut impl RepoPublishable, author: Optio
     match arboard::Clipboard::new().unwrap().set_text(content_url) {
         Ok(_) => thread_log.log_success("Copied link to clipboard"),
         Err(e) => {
+            thread_log.log_err(format!("Error whilst copying to clipboard {:?}", e));
             panic!("Sprix couldn't be bothered implementing proper error handling for this and would just like to eat")
         }
     }

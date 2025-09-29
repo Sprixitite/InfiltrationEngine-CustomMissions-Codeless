@@ -1,7 +1,6 @@
 use std::{path::{Path, PathBuf}};
 
 use clap::Parser;
-use git2::Repository;
 
 mod main_err;
 mod program_info;
@@ -82,7 +81,7 @@ fn validate_args(mut args: ProgramArgs, log: &cmterm::Log) -> Result<ProgramArgs
     return Ok(args);
 }
 
-fn run_server(program: &ProgramInfo, repo: &Repository) -> Result<(), MainErr> {
+fn run_server(program: &ProgramInfo) -> Result<(), MainErr> {
     // Start Server
     program.main_log.log(format!("Starting server @ localhost:{}", program.args.port));
 
@@ -120,7 +119,7 @@ fn program_loop(mut program: ProgramInfo) -> Result<(), MainErr> {
 
     let repo_path = program.args.repo_path.as_ref().unwrap();
 
-    let repo = match repo_management::get_repo(repo_path) {
+    let _repo = match repo_management::get_repo(repo_path) {
         Ok(r) => r,
         Err(e) => {
             program.main_log.log_warn(
@@ -131,7 +130,7 @@ fn program_loop(mut program: ProgramInfo) -> Result<(), MainErr> {
         }
     };
 
-    match run_server(&program, &repo) {
+    match run_server(&program) {
         Ok(_) => (),
         Err(e) => {
             program.main_log.log_err(format!("Server failed to start with error:\n{}", e));

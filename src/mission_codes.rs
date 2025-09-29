@@ -97,8 +97,8 @@ impl RepoItem for CodelessInfo {
 }
 
 impl RepoPublishable for CodelessInfo {
-    fn repo_publish(&self, repo: &Repository) -> Result<(), RepoError> { return Ok(()); }
-    fn repo_valid(&self, repo: &Repository) -> Result<(), RepoError> { return Ok(()); }
+    fn repo_publish(&self, _repo: &Repository) -> Result<(), RepoError> { return Ok(()); }
+    fn repo_valid(&self, _repo: &Repository) -> Result<(), RepoError> { return Ok(()); }
 }
 
 pub enum CodelessRepoFeature {
@@ -141,7 +141,7 @@ impl RepoPublishable for CodelessRepoFeature {
                 repo_management::overwrite_file(repo, ".custommissionversion", &v.to_string())?;
                 Ok(())
             }
-            CodelessRepoFeature::UnknownFeature(f) => {
+            CodelessRepoFeature::UnknownFeature(_f) => {
                 Ok(())
             }
         }
@@ -176,7 +176,7 @@ impl RepoDerivable for CodelessRepoFeature {
         }
     }
 
-    fn repo_process(&mut self, repo: &Repository) -> Result<(), RepoError> {
+    fn repo_process(&mut self, _repo: &Repository) -> Result<(), RepoError> {
         return match self {
             CodelessRepoFeature::MissionVersion(v) => {
                 *v += 1;
