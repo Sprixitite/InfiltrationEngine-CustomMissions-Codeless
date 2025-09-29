@@ -1,4 +1,4 @@
-use std::{sync::{mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError}, Arc}, thread::{self, JoinHandle}, time::Duration};
+use std::{sync::{mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError}, Arc, Condvar, Mutex}, thread::{self, JoinHandle}, time::Duration};
 use console::Term;
 
 mod input;
@@ -82,28 +82,48 @@ impl Manager {
     }
 
     fn input_loop(kill_recv: Receiver<()>, senders: Vec<Sender<console::Key>>) {
-        let delay = Duration::from_millis(30);
+        let delay = Duration::from_millis(500);
+
+        let key_read = Arc::new(Mutex::new(false));
+        let key_read_condvar = Arc::new(Condvar::new());
 
         loop {
-            let readkey = thread::Builder::new().name("input/readkey".into()).spawn(|| {
-                return Term::stderr().read_key();
-            }).unwrap();
-            
-            while !(&readkey).is_finished() {
-                match kill_recv.recv_timeout(delay) {
-                    Ok(_) => return,
-                    Err(e) => match e {
-                        RecvTimeoutError::Timeout => (),
-                        RecvTimeoutError::Disconnected => return,
-                    }
-                };
-            }
+            let key_read_2 = key_read.clone();
+            let key_read_condvar_2 = key_read_condvar.clone();
 
-            let readkey_result = match readkey.join() {
-                Ok(k) => k,
-                Err(e) => panic!("Readkey thread had error {:?}", e)
+            let mut key_read_success = key_read.lock().unwrap();
+            *key_read_success = false;
+
+            let readkey_thread = thread::Builder::new().name(String::from("input readkey")).spawn(move || {
+                let key = Term::stderr().read_key();
+                *(key_read_2.lock().unwrap()) = true;
+                key_read_condvar_2.notify_all();
+                return key;
+            }).unwrap();
+
+            let mut disconnect = false;
+            while !(*key_read_success) && !disconnect {
+                key_read_success = match key_read_condvar.wait_timeout(key_read_success, delay) {
+                    Ok((krs, _wtr)) => krs,
+                    Err(e) => panic!("PoisonError {:?} in input readkey thread!", e)
+                };
+
+                match kill_recv.try_recv() {
+                    Ok(_) => { disconnect = true; },
+                    Err(e) => match e {
+                        TryRecvError::Disconnected => { disconnect = true; },
+                        TryRecvError::Empty => continue
+                    }
+                }
             };
 
+            if disconnect { return }
+
+            let readkey_result = match readkey_thread.join() {
+                Ok(s) => s,
+                Err(e) => panic!("Readkey thread panicked with {:?}", e)
+            };
+            
             let key = match readkey_result {
                 Ok(k) => k,
                 Err(e) => panic!("Failed to read key with {:?}", e),
@@ -136,8 +156,8 @@ impl Manager {
 
         let kill_join = thread::Builder::new().name(String::from("render/input kill")).spawn(move || {
             let _result = kkill_recv.recv();
-            rkill_send.send(()).expect("render thread kill shouldn't have hung up");
             ikill_send.send(()).expect("input thread kill shouldn't have hung up");
+            rkill_send.send(()).expect("render thread kill shouldn't have hung up");
             input_join.join().expect("input thread should've exited gracefully");
             return render_join.join().unwrap();
         }).unwrap();
