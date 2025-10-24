@@ -19,6 +19,8 @@ pub enum RepoError {
     HeadCheckFailed(String),
     HeadDetached(String),
     HeadNotBranch(String),
+
+    CloneFailed(String)
 }
 
 impl Display for RepoError {
@@ -37,6 +39,8 @@ impl Display for RepoError {
 
             Self::PublishError(s) => f.write_fmt(format_args!("publish error: {s}")),
             Self::DeriveError(s) => f.write_fmt(format_args!("derive error: {s}")),
+
+            Self::CloneFailed(s) => f.write_fmt(format_args!("clone error: {s}"))
         }
     }
 }
@@ -326,6 +330,25 @@ pub fn get_index(repo: &Repository) -> Result<Index, RepoError> {
     return match repo.index() {
         Ok(i) => Ok(i),
         Err(e) => Err(RepoError::GitErr(e, String::from("retrieve repo index")))
+    };
+}
+
+pub fn clone(url: &str, dest: impl AsRef<Path>) -> Result<(), RepoError> {
+    let thread_log = cmterm::Log::get();
+    let git_auth = auth_git2::GitAuthenticator::new().set_prompter(LogHandle::new(thread_log.clone()))
+                                     .add_default_ssh_keys()
+                                     .try_cred_helper(true)
+                                     .try_ssh_agent(true)
+                                     .try_password_prompt(1)
+                                     .prompt_ssh_key_password(true);
+    
+    return match git_auth.clone_repo(url, dest) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let err_msg = format!("Clone failed with error {e}");
+            thread_log.log_err(&err_msg);
+            Err(RepoError::CloneFailed(err_msg))
+        }
     };
 }
 

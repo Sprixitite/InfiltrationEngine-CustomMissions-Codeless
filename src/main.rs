@@ -163,6 +163,38 @@ fn main() {
     let server_log = term_man.server_log.clone();
 
     let (kill_render, join_renderthread) = term_man.spawn_threads(args.terminal_redraw_delay);
+    cmterm::Log::set(main_log.clone());
+
+    if args.download_repo {
+        main_log.log("Opened in experimental repo download mode");
+        let repo_url = match main_log.request_string("Enter Gist Repo URL // ") {
+            Ok(url) => url,
+            Err(e) => { 
+                main_log.log_err(format!("Failed to retrieve gist URL as input\n{e}"));
+                kill_render.send(()).unwrap();
+                join_renderthread.join().unwrap();
+                return; 
+            },
+        };
+        let repo_destination = match main_log.request_string("Enter Download Location // ") {
+            Ok(dest) => dest,
+            Err(e) => { 
+                main_log.log_err(format!("Failed to retrieve repo destination as input\n{e}"));
+                kill_render.send(()).unwrap();
+                join_renderthread.join().unwrap(); 
+                return;
+            }
+        };
+        
+        match repo_management::clone(&repo_url, &repo_destination) {
+            Ok(_) => main_log.log_success(format!("Successfully cloned gist repo {} to folder {}", &repo_url, &repo_destination)),
+            Err(e) => main_log.log_err(format!("Failed to clone gist repo {} to folder {}\n{}", &repo_url, &repo_destination, e)),
+        }
+
+        kill_render.send(()).unwrap();
+        join_renderthread.join().unwrap();
+        return;
+    }
 
     args = match validate_args(args, &main_log) {
         Ok(a) => a,

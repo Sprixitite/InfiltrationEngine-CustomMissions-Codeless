@@ -30,11 +30,6 @@ pub struct ProgramArgs {
     #[arg(short='p', long="port", value_name="PORT", default_value_t=47362)]
     pub port: u16,
 
-    /// The delay between passive terminal redraws in milliseconds
-    /// Does not affect redraws which occur when requesting/receiving user input in interactive mode
-    #[arg(short='d', long="redraw-delay", value_name="MILLISECONDS", default_value_t=250)]
-    pub terminal_redraw_delay: u64,
-
     /// Disables interactive terminal interface
     #[arg(short='e', long="no-interact", default_value_t=false)]
     pub no_interactivity: bool,
@@ -43,12 +38,22 @@ pub struct ProgramArgs {
     #[arg(short='c', long="hide-url", default_value_t=false)]
     pub hide_url: bool,
 
+    /// [Experimental] Use the program to clone a gist repo without the need of interfacing with a git client
+    #[arg(short='d', long="download-repo", default_value_t=false)]
+    pub download_repo: bool,
+
     /// Workaround for the clipboard on Linux
     /// When passed the program will do nothing but run in the background providing the passed string for the OS
     /// The program will then close when the clipboard contents are changed
     #[cfg(target_os="linux")]
     #[arg(long=DAEMON_ARG)]
-    pub linux_clipboard_daemon: Option<String>
+    pub linux_clipboard_daemon: Option<String>,
+
+    /// The delay between passive terminal redraws in milliseconds
+    /// Does not affect redraws which occur when requesting/receiving user input in interactive mode
+    #[arg(long="redraw-delay", value_name="MILLISECONDS", default_value_t=250)]
+    pub terminal_redraw_delay: u64,
+
 }
 
 pub struct ProgramInfo {

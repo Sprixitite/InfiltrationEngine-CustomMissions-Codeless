@@ -82,7 +82,7 @@ impl Log {
 
     pub fn log_err(&self, msg: impl AsRef<str>) {
         static PREFIX: LazyLock<String> = LazyLock::new(|| {
-            style("  ERROR:").bold().red().on_red().to_string()
+            style("  ERROR:").bold().white().on_red().to_string()
         });
 
         return self._log(
